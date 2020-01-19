@@ -2,8 +2,11 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"go/format"
+	"io/ioutil"
+	"path/filepath"
 	"text/template"
 
 	"github.com/spf13/cobra"
@@ -14,25 +17,34 @@ const aliasFileName = "alias.go"
 
 var (
 	targetPkgSpec string
+	writeToStdout bool
 	rootCmd       = &cobra.Command{
 		Use:   "aliasgen [packages]",
-		Short: "short help text",
-		Long:  `long help text`,
-		Args:  cobra.MinimumNArgs(1),
+		Short: "create a go file that aliases outside packages into the current package scope",
+		Long: `Create a file that imports the specified packages and renames the objects within as objects in the current package.
+		
+For example, if package x defines a function 'SomeFunction' and variable 'SomeVar', then a this will create a go file in the current package with:
+var (
+	SomeFunction = x.SomeFunction
+	SomeVar      = x.SomeVar
+)
+Types and constants will also be aliased.`,
+		Args: cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return Run(targetPkgSpec, args...)
+			return GenerateAlias(targetPkgSpec, args...)
 		},
 	}
 )
 
 func init() {
-	rootCmd.Flags().StringVarP(&targetPkgSpec, "target", "t", ".", fmt.Sprintf("package to add a %s file to", aliasFileName))
+	rootCmd.Flags().StringVarP(&targetPkgSpec, "target", "t", ".", fmt.Sprintf("package to add the %s file to", aliasFileName))
+	rootCmd.Flags().BoolVarP(&writeToStdout, "stdout", "s", false, "write to standard output instead of a file")
 }
 
-func Run(targetPkgSpec string, aliasPkgSpecs ...string) error {
+func GenerateAlias(targetPkgSpec string, aliasPkgSpecs ...string) error {
 
-	// Get name of package to create alias for
-	targetPkg, err := packages.Load(&packages.Config{Mode: packages.NeedName}, targetPkgSpec)
+	// Get name of package to create alias for, and full package file path
+	targetPkg, err := packages.Load(&packages.Config{Mode: packages.NeedName | packages.NeedFiles}, targetPkgSpec)
 	if err != nil {
 		return fmt.Errorf("could not load target package: %w", err)
 	}
@@ -42,7 +54,16 @@ func Run(targetPkgSpec string, aliasPkgSpecs ...string) error {
 	if len(targetPkg) > 1 {
 		return fmt.Errorf("found more than one target package for path '%s", targetPkgSpec)
 	}
+	errs := pkgErrors(targetPkg[0].Errors)
+	errs = errs.RemoveKind(packages.TypeError) // ignore type errors
+	if len(errs) > 0 {
+		return fmt.Errorf("could not load target package: %w", errs)
+	}
+	if len(targetPkg[0].GoFiles) == 0 {
+		return errors.New("cannot find files for target package")
+	}
 	targetPkgName := targetPkg[0].Name
+	aliasFilePath := filepath.Join(filepath.Dir(targetPkg[0].GoFiles[0]), aliasFileName)
 
 	// Parse packages to alias
 	// This returns a list of packages that have been parsed into AST, and types.
@@ -53,6 +74,13 @@ func Run(targetPkgSpec string, aliasPkgSpecs ...string) error {
 	}
 	if len(pkgs) == 0 {
 		return fmt.Errorf("no packages found for paths %s", aliasPkgSpecs)
+	}
+	for _, p := range pkgs {
+		errs = pkgErrors(p.Errors)
+		errs = errs.RemoveKind(packages.TypeError) // ignore type errors
+		if len(errs) > 0 {
+			return fmt.Errorf("could not load packages: %w", errs)
+		}
 	}
 
 	// Extract data
@@ -79,15 +107,13 @@ func Run(targetPkgSpec string, aliasPkgSpecs ...string) error {
 	}
 
 	// Write out file
-	fmt.Println("AFASDF", targetPkg[0].PkgPath)
-	// TODO need to get file name for writing alias to
-	// ideally specify as a system path, then load module from there, and write to the file path
-	// but don't know how to load module from there
-	// this should ideally also check whether alias pkgs can be imported from target
-	// if err := ioutil.WriteFile("/tmp/dat1", out, 0644); err != nil {
-	// 	return fmt.Errorf("couldn't write to file: %w", err)
-	// }
-	fmt.Println(string(out))
+	if writeToStdout {
+		fmt.Println(string(out))
+	} else {
+		if err := ioutil.WriteFile(aliasFilePath, out, 0644); err != nil {
+			return fmt.Errorf("couldn't write to file: %w", err)
+		}
+	}
 
 	return nil
 }

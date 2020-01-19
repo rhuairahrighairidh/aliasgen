@@ -16,3 +16,8 @@ resources on go parsing
 
 
 this could be run by go generate - leave a comment at the top of a file in a module root directory
+
+Packages contain a name and a path.
+Path is the import path - relative to gopath/src or the containing module.
+However, if the pkgSpec is outside of the current module (or presumably GOPATH) then the name is unknown and the path is "command-line-arguments". Though if the package isn't even a go package an error is returned.
+Also in outside-module case the pkg.Errors has an error about not being inside a package
