@@ -22,14 +22,15 @@ var (
 		Use:   "aliasgen [packages]",
 		Short: "create a go file that aliases outside packages into the current package scope",
 		Long: `Create a file that imports the specified packages and renames the objects within as objects in the current package.
-		
+
 For example, if package x defines a function 'SomeFunction' and variable 'SomeVar', then a this will create a go file in the current package with:
 var (
 	SomeFunction = x.SomeFunction
 	SomeVar      = x.SomeVar
 )
 Types and constants will also be aliased.`,
-		Args: cobra.MinimumNArgs(1),
+		Example: `aliasgen ./a/sub/package ./anotherpackage`,
+		Args:    cobra.MinimumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return GenerateAlias(targetPkgSpec, args...)
 		},
